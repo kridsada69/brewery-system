@@ -12,13 +12,14 @@ const row = z.object({
   minutes:quantity.nullable().optional(),laboratory:z.string().optional(),productId:z.string().optional()
 });
 export const recipeSchema = z.object({
-  hops:z.array(hop),dryHopAfterDays:quantity.nullable(),
+  hops:z.array(hop),dryHopAfterDays:quantity.nullable(),notes:z.string().max(20000).optional(),
   liters:quantity.nullable().optional(),malt:z.array(row).optional(),
   hopRows:z.array(row).optional(),yeast:z.array(row).optional()
 });
 export const batchSchema = z.object({
   id:z.string().optional(),recipe:z.string().min(1),status:z.enum(["Plan","Ferment","Cold crash","Complete"]).optional(),
   og:z.number().min(1),ph:z.number().min(0).max(14),liters:z.number().positive().max(60),
+  fermentationTemperature:z.number().finite().min(-10).max(60).nullable().optional(),
   fermentedOn:date,dryHopAfterDays:quantity.nullable(),
   dryHopOn:date.nullable().optional(),dryHopDates:z.record(z.string(),date).optional(),
   completedHops:z.array(z.number().int().nonnegative()).optional(),

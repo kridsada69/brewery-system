@@ -30,18 +30,23 @@ test("migrated UI mounts, saves Ferment, restores stock on Plan and completes wi
     assert.match(root.querySelector("#board")!.textContent!,/C-01/);
     click('[data-cabinet="0"][data-slot="0"]');
     const form=root.querySelector("#batch") as HTMLFormElement;
-    for (const [name,value] of Object.entries({recipe:"Von Elbert",status:"Ferment",og:"1.06",ph:"5.4",liters:"45"})) {
+    for (const [name,value] of Object.entries({recipe:"Von Elbert",status:"Ferment",og:"1.06",ph:"5.4",liters:"45",fermentationTemperature:"19.4"})) {
       (form.elements.namedItem(name) as HTMLInputElement).value=value;
     }
     (form.elements.namedItem("recipe") as HTMLSelectElement).dispatchEvent(new window.Event("change",{bubbles:true}));
     submit();
+    assert.equal(board().cabinets[0].batches[0].fermentationTemperature,19.4);
+    assert.match(root.querySelector('#board')!.textContent!,/19.4 °C/);
     const usage=board().cabinets[0].batches[0].stockUsage;
     assert.equal(usage.base.find((item:{type:string})=>item.type==="Malt").grams,11000);
     assert.equal(saveSchema.safeParse({revision:0,data:saved}).success,true);
     click('[data-cabinet="0"][data-slot="0"]');
+    assert.equal((form.elements.namedItem('fermentationTemperature') as HTMLInputElement).value,'19.4');
+    (form.elements.namedItem('fermentationTemperature') as HTMLInputElement).value='';
     (form.elements.namedItem("status") as HTMLSelectElement).value="Plan";
     submit();
     assert.equal(board().cabinets[0].batches[0].stockUsage.base.length,0);
+    assert.equal(board().cabinets[0].batches[0].fermentationTemperature,null);
     click('[data-cabinet="0"][data-slot="0"]');
     (form.elements.namedItem("status") as HTMLSelectElement).value="Ferment";
     const hop=root.querySelector('[name="completedHops"]') as HTMLInputElement;
@@ -74,6 +79,37 @@ test("migrated UI mounts, saves Ferment, restores stock on Plan and completes wi
     assert.equal(root.querySelectorAll('[data-hop-date]').length,2);
     assert.match(root.querySelector('#hop-list')!.textContent!,/หลังเริ่มหมัก 2 วัน/);
     assert.match(root.querySelector('#hop-list')!.textContent!,/ก่อนจบการหมัก 4 วัน/);
+    assert.equal(saveSchema.safeParse({revision:0,data:saved}).success,true);
+
+    // The brewer requested ferment date + BeerXML days as the default schedule.
+    const kadoor = '<RECIPES><RECIPE><NAME>Kadoor test</NAME><NOTES>Dry hop ตอน FG. 1.014</NOTES><HOPS><HOP><NAME>Strata</NAME><AMOUNT>0.144</AMOUNT><USE>Dry Hop</USE><TIME>2880</TIME></HOP></HOPS></RECIPE></RECIPES>';
+    root.querySelector('#recipe-feedback')!.textContent='';
+    Object.defineProperty(fileInput,'files',{configurable:true,value:[{arrayBuffer:async()=>new TextEncoder().encode(kadoor).buffer}]});
+    fileInput.dispatchEvent(new window.Event('change',{bubbles:true}));
+    for (let attempt=0;attempt<20 && !root.querySelector('#recipe-feedback')!.textContent;attempt++) {
+      await new Promise(resolve=>setTimeout(resolve,10));
+    }
+    assert.match(root.querySelector('#recipe-details')!.textContent!,/FG. 1.014/);
+    click('[data-cabinet="0"][data-slot="0"]');
+    (form.elements.namedItem('recipe') as HTMLSelectElement).value='Kadoor test';
+    (form.elements.namedItem('recipe') as HTMLSelectElement).dispatchEvent(new window.Event('change',{bubbles:true}));
+    assert.match(root.querySelector('#hop-list')!.textContent!,/แช่ฮอป 2 วัน/);
+    (form.elements.namedItem('fermentedOn') as HTMLInputElement).value='2026-11-06';
+    form.dispatchEvent(new window.Event('input',{bubbles:true}));
+    assert.match(root.querySelector('[data-hop-schedule]')!.textContent!,/8 พฤศจิกายน 2026/);
+    const hopDate=root.querySelector('[data-hop-date]') as HTMLInputElement;
+    assert.equal(hopDate.hidden,false);
+    hopDate.value='2026-11-10';
+    hopDate.dispatchEvent(new window.Event('input',{bubbles:true}));
+    assert.match(root.querySelector('[data-hop-schedule]')!.textContent!,/10 พฤศจิกายน 2026/);
+    for (const [name,value] of Object.entries({og:'1.068',ph:'5.4',liters:'45',fermentedOn:'2026-11-06'})) {
+      (form.elements.namedItem(name) as HTMLInputElement).value=value;
+    }
+    (form.elements.namedItem('status') as HTMLSelectElement).value='Ferment';
+    submit();
+    assert.equal(board().cabinets[0].batches[0].dryHopDates['2880'],'2026-11-10');
+    assert.equal(board().cabinets[0].batches[0].recipeSnapshot.notes,'Dry hop ตอน FG. 1.014');
+    assert.match(root.querySelector('#board')!.textContent!,/10 พฤศจิกายน 2026/);
     assert.equal(saveSchema.safeParse({revision:0,data:saved}).success,true);
 
   } finally {cleanup();dom.window.close();}

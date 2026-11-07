@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {buildSummary,belowThreshold,hazeHopOffset,shiftedDate,stockKey} from "../src/lib/alerts";
+import {buildSummary,belowThreshold,hazeHopOffset,dryHopOffset,shiftedDate,stockKey} from "../src/lib/alerts";
 import {saveSchema} from "../src/lib/state";
 import {createSession,validSession} from "../src/lib/auth";
 const recipe={hops:[{name:"Citra",grams:50},{name:"Mosaic",grams:40}],dryHopAfterDays:2};
@@ -53,4 +53,21 @@ test("sessions reject tampering and expiry",()=>{
   assert.equal(validSession(token,now),true);
   assert.equal(validSession(token+"x",now),false);
   assert.equal(validSession(token,now+8*86400000),false);
+});
+
+test("default dry hop dates use ferment date plus XML days in alerts",()=>{
+  assert.equal(dryHopOffset('Kadoor',2880,null),2);
+  assert.equal(dryHopOffset('Kadoor',2880,5),5);
+  assert.equal(dryHopOffset('Haze 7-0 v.23',5760,null),10);
+  assert.equal(dryHopOffset('Unknown',null,null),null);
+  const source=data(),board=JSON.parse(source['brew-day-board-v1']);
+  const current=board.cabinets[0].batches[0];
+  current.dryHopAfterDays=null;
+  current.recipeSnapshot.hopRows=current.recipeSnapshot.hops.map((hop:{name:string;grams:number})=>({name:hop.name,amount:hop.grams,unit:'g',stage:'Dry Hop',minutes:2880}));
+  source['brew-day-board-v1']=JSON.stringify(board);
+  assert.match(buildSummary(source,'2026-11-07'),/Mosaic 40 g/);
+  current.dryHopDates={'2880':'2026-11-08'};
+  source['brew-day-board-v1']=JSON.stringify(board);
+  assert.doesNotMatch(buildSummary(source,'2026-11-07'),/Mosaic 40 g/);
+  assert.match(buildSummary(source,'2026-11-08'),/Mosaic 40 g/);
 });

@@ -1,3 +1,4 @@
+import {dryHopOffset} from '../lib/alerts';
 // UI behavior migrated from the reviewed interactive prototype.
 // Domain data is validated and persisted through the Next.js state API.
 export function mountBrewery(root, storage) {
@@ -138,7 +139,7 @@ function parseBeerXml(xml) {
     const dryHopAfterDays = hopRows.some(hop => hop.stage.toLowerCase() === 'dry hop') &&
       Number.isInteger(startDays) && startDays >= 0 && startDays <= 365 ? startDays : null;
     result[name] = {
-      liters:readAmount(element, 'BATCH_SIZE'), dryHopAfterDays, malt, hopRows, yeast,
+      liters:readAmount(element, 'BATCH_SIZE'), notes, dryHopAfterDays, malt, hopRows, yeast,
       hops:hopRows.filter(hop => hop.stage.toLowerCase() === 'dry hop' && hop.amount !== null)
         .map(hop => ({name:hop.name, grams:hop.amount}))
     };
@@ -207,6 +208,12 @@ function renderRecipe(editing = false) {
     volume.textContent = 'ขนาดรอบต้ม · ' + recipe.liters + ' L';
     content.append(volume);
   }
+  if (recipe.notes) {
+    const notes = document.createElement('p');
+    notes.className = 'whitespace-pre-line text-sm text-amber-300';
+    notes.textContent = recipe.notes;
+    content.append(notes);
+  }
   if (recipe.dryHopAfterDays != null && !hopGroups(recipe).some(group => hazeHopOffset(recipeLibrary.value, group.minutes) !== null)) {
     const start = document.createElement('p');
     start.className = 'text-sm text-amber-300';
@@ -232,7 +239,7 @@ function renderRecipe(editing = false) {
       const days = row.minutes / 1440;
       const time = dryHop && hazeHopOffset(recipeLibrary.value, row.minutes) !== null
         ? hopTiming(recipeLibrary.value, row.minutes) : row.minutes == null ? '' : dryHop
-        ? ' · ' + new Intl.NumberFormat(language, {maximumSignificantDigits:6}).format(days) +
+        ? (language === 'th' ? ' · แช่ฮอป ' : ' · Contact time: ') + new Intl.NumberFormat(language, {maximumSignificantDigits:6}).format(days) +
           (language === 'th' ? ' วัน' : days === 1 ? ' day' : ' days')
         : ' · ' + row.minutes + ' min';
       // This brewery's XML export uses the yeast amount as kg even when flagged as volume.
@@ -422,6 +429,12 @@ sgRows.addEventListener('click', event => {
   renderSg();
 });
 
+function formatHopDate(date) {
+  return new Intl.DateTimeFormat(language === 'en' ? 'en-GB' : 'th-TH', {
+    day:'numeric', month:'long', year:'numeric', calendar:'gregory', timeZone:'UTC'
+  }).format(new Date(date + 'T00:00:00Z'));
+}
+
 function dryHopDate(date, days, override) {
   if (override) return override;
   if (!date || days == null) return null;
@@ -441,10 +454,10 @@ function updateDryHop() {
   const date = form.elements.fermentedOn.value;
   for (const input of form.querySelectorAll('[data-hop-date]')) {
     input.min = date;
-    const offset = hazeHopOffset(recipeSelect.value, Number(input.dataset.minutes)) ?? recipe?.dryHopAfterDays;
+    const offset = dryHopOffset(recipeSelect.value, input.dataset.minutes === '' ? null : Number(input.dataset.minutes), recipe?.dryHopAfterDays);
     const scheduled = dryHopDate(date, offset, input.value);
     input.previousElementSibling.textContent = scheduled
-      ? 'วัน Dry Hop · ' + dateFormat.format(new Date(scheduled + 'T00:00:00Z')) : 'กำหนดวันเริ่ม Dry Hop';
+      ? 'วันที่ใส่ Dry Hop · ' + formatHopDate(scheduled) : 'ยังไม่มีวันที่ใส่ Dry Hop · เลือกวันที่ด้านล่าง';
   }
 }
 form.addEventListener('input', updateDryHop);
@@ -457,7 +470,7 @@ hopList.addEventListener('click', event => {
 hopList.addEventListener('change', event => {
   const input = event.target.closest('[data-hop-date]');
   if (input && input.checkValidity()) {
-    input.hidden = true;
+    input.hidden = false;
     input.previousElementSibling.focus();
   }
 });
@@ -487,15 +500,16 @@ function hopTiming(name, minutes) {
   const offset = hazeHopOffset(name, minutes);
   if (offset === 2) return ' · หลังเริ่มหมัก 2 วัน';
   if (offset === 10) return ' · ก่อนจบการหมัก 4 วัน';
-  return hopDuration(minutes);
+  const days = dryHopOffset(name, minutes, null);
+  return (days === null ? '' : ' · หลังเริ่มหมัก ' + days + ' วัน') + hopDuration(minutes);
 }
 function hopDuration(minutes) {
-  return minutes == null ? '' : ' · ' + Number((minutes / 1440).toPrecision(6)) + ' วัน';
+  return minutes == null ? '' : ' · แช่ฮอป ' + Number((minutes / 1440).toPrecision(6)) + ' วัน';
 }
 function scheduledHopGroups(batch) {
   return hopGroups((batch.recipeSnapshot ?? recipes[batch.recipe])).map(group => ({
     ...group,
-    date:dryHopDate(batch.fermentedOn, hazeHopOffset(batch.recipe, group.minutes) ?? batch.dryHopAfterDays, batch.dryHopDates?.[group.key] || batch.dryHopOn)
+    date:dryHopDate(batch.fermentedOn, dryHopOffset(batch.recipe, group.minutes, batch.dryHopAfterDays), batch.dryHopDates?.[group.key] || batch.dryHopOn)
   }));
 }
 function renderHops() {
@@ -504,11 +518,13 @@ function renderHops() {
     ? batch.recipeSnapshot ?? recipes[recipeSelect.value] : recipes[recipeSelect.value]);
   const saved = batch?.recipe === recipeSelect.value ? batch : null;
   const completed = saved?.completedHops ?? [];
+  const notes = (saved?.recipeSnapshot ?? recipes[recipeSelect.value])?.notes;
   hopList.innerHTML = groups.map(({key, minutes, hops}, groupIndex) => `
     <div class="space-y-2 rounded-xl border border-zinc-700 p-3">
       <p class="text-sm font-semibold text-amber-300">รอบ Dry Hop ${groupIndex + 1}${hopTiming(recipeSelect.value, minutes)}</p>
       <button type="button" data-hop-schedule class="cursor-pointer text-xs text-zinc-400 underline decoration-dotted underline-offset-4"></button>
-      <input type="date" hidden aria-label="วันเริ่มรอบนี้" data-hop-date data-minutes="${minutes ?? ''}" name="dryHopGroup-${key}" value="${saved?.dryHopDates?.[key] || saved?.dryHopOn || ''}" class="block w-full rounded-lg border border-zinc-700 bg-zinc-950 p-2">
+      <input type="date" aria-label="วันเริ่มรอบนี้" data-hop-date data-minutes="${minutes ?? ''}" name="dryHopGroup-${key}" value="${saved?.dryHopDates?.[key] || saved?.dryHopOn || ''}" class="block w-full rounded-lg border border-zinc-700 bg-zinc-950 p-2">
+      ${notes ? `<p class="whitespace-pre-line text-xs text-amber-200">${escapeHtml(notes)}</p>` : ''}
       ${hops.map(({name, grams, index}) => `
         <label class="flex cursor-pointer items-center gap-3 rounded-lg border border-zinc-700 px-3 py-2 text-sm has-checked:border-emerald-600 has-checked:bg-emerald-950">
           <input type="checkbox" name="completedHops" value="${index}" ${completed.includes(index) ? 'checked' : ''} class="peer size-4 accent-emerald-500">
@@ -540,9 +556,9 @@ function renderHistory() {
     const hops = (batch.recipeSnapshot ?? recipes[batch.recipe]).hops.map(({name, grams}, index) =>
       `${batch.completedHops?.includes(index) ? '✓ ' : ''}${name} ${grams} g`);
     details.textContent = [
-      `วันหมัก ${batch.fermentedOn} · ${fermentationDays(batch)} วัน · OG ${batch.og.toFixed(3)} · pH ${batch.ph.toFixed(2)}`,
+      `วันหมัก ${batch.fermentedOn} · ${fermentationDays(batch)} วัน · OG ${batch.og.toFixed(3)} · pH ${batch.ph.toFixed(2)}${batch.fermentationTemperature == null ? '' : ' · ' + batch.fermentationTemperature + ' °C'}`,
       ...scheduledHopGroups(batch).map((group, index) =>
-        'รอบ Dry Hop ' + (index + 1) + hopTiming(batch.recipe, group.minutes) + ' · ' + (group.date ?? 'ยังไม่กำหนดวันเริ่ม Dry Hop')),
+        'รอบ Dry Hop ' + (index + 1) + hopTiming(batch.recipe, group.minutes) + ' · ' + (group.date ? formatHopDate(group.date) : 'ยังไม่กำหนดวันเริ่ม Dry Hop')),
       ...hops, ...sg.map(row => 'SG ' + row)
     ].filter(Boolean).join('\n');
     const actions = document.createElement('div');
@@ -830,10 +846,10 @@ function render() {
           <span class="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold ${statusStyles[batch.status ?? 'Ferment']}">${batch.status === 'Cold crash' ? '<span aria-hidden="true">❄</span>' : ''}${batch.status ?? 'Ferment'}</span>
           <span class="mt-1 block text-xs text-zinc-300">ถัง ${slot + 1} · ${batch.status === 'Plan' ? 'ยังไม่เริ่มหมัก' : `<strong class="font-bold text-violet-300">หมักแล้ว ${fermentationDays(batch)} วัน</strong>`}</span>
           <span class="block mt-1 font-semibold">${escapeHtml(batch.recipe)} · ${batch.liters} ลิตร</span>
-          <span class="block mt-1 text-xs tabular-nums text-zinc-300">OG ${batch.og.toFixed(3)} <span class="mx-1 text-zinc-500">|</span> pH ${batch.ph.toFixed(2)}</span>
+          <span class="block mt-1 text-xs tabular-nums text-zinc-300">OG ${batch.og.toFixed(3)} <span class="mx-1 text-zinc-500">|</span> pH ${batch.ph.toFixed(2)}${batch.fermentationTemperature == null ? '' : ' · ' + batch.fermentationTemperature + ' °C'}</span>
           <span class="block mt-2 text-xs text-zinc-300">วันหมัก · ${dateFormat.format(new Date(batch.fermentedOn + 'T00:00:00Z'))}</span>
           ${scheduledHopGroups(batch).map((group, index) => `
-            <span class="mt-2 block text-xs text-amber-300">รอบ Dry Hop ${index + 1}${hopTiming(batch.recipe, group.minutes)} · ${group.date ? dateFormat.format(new Date(group.date + 'T00:00:00Z')) : 'ยังไม่กำหนดวันเริ่ม Dry Hop'}</span>
+            <span class="mt-2 block text-xs text-amber-300">รอบ Dry Hop ${index + 1}${hopTiming(batch.recipe, group.minutes)} · ${group.date ? 'วันที่ใส่ ' + formatHopDate(group.date) : 'ยังไม่กำหนดวันเริ่ม Dry Hop'}</span>
             ${group.hops.map(({name, grams, index}) => {
               const done = batch.completedHops?.includes(index);
               return `<span class="mt-1 block text-xs ${done ? 'text-emerald-300' : 'text-zinc-300'}">${done ? '✓ ' : ''}<span class="${done ? 'line-through' : ''}">${escapeHtml(name)} · ${grams} g</span></span>`;
@@ -981,7 +997,7 @@ function openBatch(batch, cabinetId) {
   closeSg();
   renderSg();
   if (batch) {
-    for (const name of ['recipe', 'og', 'ph', 'liters', 'fermentedOn', 'note']) {
+    for (const name of ['recipe', 'og', 'ph', 'liters', 'fermentationTemperature', 'fermentedOn', 'note']) {
       form.elements[name].value = batch[name] ?? '';
     }
   }
@@ -1013,11 +1029,12 @@ function saveBatch(completing) {
     return;
   }
   if (!form.reportValidity()) return;
-  const {recipe, og, ph, liters, fermentedOn} = Object.fromEntries(new FormData(form));
+  const {recipe, og, ph, liters, fermentationTemperature, fermentedOn} = Object.fromEntries(new FormData(form));
   const status = completing
     ? 'Complete' : form.elements.status.value;
   if (status === 'Complete' && !window.confirm(language === 'en' ? `Complete ${recipe}? The batch will move to history and free its tank slot.` : 'ยืนยัน Complete สำหรับ ' + recipe + '? รายการจะย้ายไปประวัติ Batch และคืนช่องในตู้หมัก')) return;
   const batch = {id:crypto.randomUUID(), recipe, status, og:Number(og), ph:Number(ph), liters:Number(liters), fermentedOn, dryHopOn:null, dryHopAfterDays:recipes[recipe].dryHopAfterDays};
+  batch.fermentationTemperature = fermentationTemperature === '' ? null : Number(fermentationTemperature);
   batch.dryHopDates = Object.fromEntries([...form.querySelectorAll('[data-hop-date]')]
     .filter(input => input.value).map(input => [input.name.slice('dryHopGroup-'.length), input.value]));
   const previous = historyIndex === null ? cabinet.batches[selectedSlot] : history[historyIndex];
@@ -1177,7 +1194,7 @@ const english = {
   "วัน": "days",
   "ลบ": "Delete"
 };
-Object.assign(english, {"แจ้งเตือน":"Alerts","สรุปวันนี้ตามเวลาไทย พร้อมคัดลอกไปส่งใน LINE":"Today’s summary in Thailand time, ready to copy to LINE.","ข้อความสรุปสำหรับ LINE":"LINE summary","คัดลอกข้อความสำหรับ LINE":"Copy message for LINE","คัดลอกข้อความแล้ว":"Message copied","เลือกข้อความแล้ว กดคัดลอกเพื่อส่งใน LINE":"Message selected. Copy it to send in LINE.","Dry Hop ที่ต้องทำวันนี้":"Dry hops due today","ไม่มี Dry Hop ที่ต้องทำวันนี้":"No dry hops due today","สต็อกถึงเกณฑ์แจ้งเตือน":"Low stock alerts","ไม่พบวัตถุดิบต่ำกว่าเกณฑ์":"No ingredients below the threshold","ตรวจเฉพาะวัตถุดิบที่กรอกยอดตั้งต้นแล้ว":"Only ingredients with an opening balance entered are checked.","ยอดตั้งต้น":"Opening stock","ตัดแล้ว":"Used","คงเหลือ":"Remaining","สต็อกวัตถุดิบ":"Ingredient Stock","ชื่อวัตถุดิบมาจากสูตรเบียร์ กรอกยอดตั้งต้นรวมที่ใช้คำนวณสต็อก":"Ingredients come from beer recipes. Enter the opening totals to calculate stock.","ยอดตั้งต้น (g)":"Opening stock (g)","ตัดแล้ว (g)":"Used (g)","คงเหลือ (g)":"Remaining (g)","บันทึกยอดสต็อก":"Save stock totals","บันทึกยอดสต็อกแล้ว":"Stock totals saved","แก้ไขสูตร":"Edit recipe","บันทึกสูตร":"Save recipe","บันทึกสูตรแล้ว":"Recipe saved","บันทึกการแก้ไขสูตรไม่ได้":"Could not save recipe changes","ลบสูตร":"Delete recipe","ลบสูตรแล้ว":"Recipe deleted","ยังไม่มีสูตรเบียร์":"No recipes yet","บันทึกการลบสูตรไม่ได้":"Could not save recipe deletion","หลังเริ่มหมัก 2 วัน":"2 days after fermentation starts","ก่อนจบการหมัก 4 วัน":"4 days before fermentation ends","รอบ Dry Hop":"Dry Hop round","วันเริ่มรอบนี้":"Start date for this round","เริ่ม Dry Hop หลังเริ่มหมัก":"Dry hop starts after fermentation begins","กำหนดวันเริ่ม Dry Hop":"Set dry hop start date","เว้นว่างเพื่อใช้วันที่จากสูตร ถ้ามี":"Leave blank to use the recipe schedule, when available.","สูตรตัวอย่าง":"Demo recipe","นำเข้า BeerXML": "Import BeerXML", "ขนาดรอบต้ม": "Batch size", "วัตถุดิบ": "Ingredient", "ปริมาณ": "Amount", "ช่วงที่ใส่ / เวลา": "Stage / time", "ไม่มีข้อมูลวัตถุดิบ": "No ingredient data", "นำเข้าสูตรแล้ว": "Recipes imported", "นำเข้าไม่สำเร็จ": "Import failed", "อ่านไฟล์ XML ไม่ได้": "Could not read XML", "ไฟล์นี้ไม่มีสูตร BeerXML": "No BeerXML recipes found", "พบสูตรที่ไม่มีชื่อ": "A recipe has no name", "อ่านหรือบันทึกไฟล์ไม่ได้": "Could not read or save the file", "ยังไม่กำหนดวันเริ่ม Dry Hop": "Dry hop start date is unspecified"});
+Object.assign(english, {"อุณหภูมิหมัก (°C)":"Fermentation temperature (°C)","เช่น 19.4":"e.g. 19.4","วันที่ใส่ Dry Hop":"Dry hop addition date","ยังไม่มีวันที่ใส่ Dry Hop · เลือกวันที่ด้านล่าง":"No dry hop date yet · Choose a date below","วันที่ใส่":"Addition date","แช่ฮอป":"Contact time","แจ้งเตือน":"Alerts","สรุปวันนี้ตามเวลาไทย พร้อมคัดลอกไปส่งใน LINE":"Today’s summary in Thailand time, ready to copy to LINE.","ข้อความสรุปสำหรับ LINE":"LINE summary","คัดลอกข้อความสำหรับ LINE":"Copy message for LINE","คัดลอกข้อความแล้ว":"Message copied","เลือกข้อความแล้ว กดคัดลอกเพื่อส่งใน LINE":"Message selected. Copy it to send in LINE.","Dry Hop ที่ต้องทำวันนี้":"Dry hops due today","ไม่มี Dry Hop ที่ต้องทำวันนี้":"No dry hops due today","สต็อกถึงเกณฑ์แจ้งเตือน":"Low stock alerts","ไม่พบวัตถุดิบต่ำกว่าเกณฑ์":"No ingredients below the threshold","ตรวจเฉพาะวัตถุดิบที่กรอกยอดตั้งต้นแล้ว":"Only ingredients with an opening balance entered are checked.","ยอดตั้งต้น":"Opening stock","ตัดแล้ว":"Used","คงเหลือ":"Remaining","สต็อกวัตถุดิบ":"Ingredient Stock","ชื่อวัตถุดิบมาจากสูตรเบียร์ กรอกยอดตั้งต้นรวมที่ใช้คำนวณสต็อก":"Ingredients come from beer recipes. Enter the opening totals to calculate stock.","ยอดตั้งต้น (g)":"Opening stock (g)","ตัดแล้ว (g)":"Used (g)","คงเหลือ (g)":"Remaining (g)","บันทึกยอดสต็อก":"Save stock totals","บันทึกยอดสต็อกแล้ว":"Stock totals saved","แก้ไขสูตร":"Edit recipe","บันทึกสูตร":"Save recipe","บันทึกสูตรแล้ว":"Recipe saved","บันทึกการแก้ไขสูตรไม่ได้":"Could not save recipe changes","ลบสูตร":"Delete recipe","ลบสูตรแล้ว":"Recipe deleted","ยังไม่มีสูตรเบียร์":"No recipes yet","บันทึกการลบสูตรไม่ได้":"Could not save recipe deletion","หลังเริ่มหมัก 2 วัน":"2 days after fermentation starts","ก่อนจบการหมัก 4 วัน":"4 days before fermentation ends","รอบ Dry Hop":"Dry Hop round","วันเริ่มรอบนี้":"Start date for this round","เริ่ม Dry Hop หลังเริ่มหมัก":"Dry hop starts after fermentation begins","กำหนดวันเริ่ม Dry Hop":"Set dry hop start date","เว้นว่างเพื่อใช้วันที่จากสูตร ถ้ามี":"Leave blank to use the recipe schedule, when available.","สูตรตัวอย่าง":"Demo recipe","นำเข้า BeerXML": "Import BeerXML", "ขนาดรอบต้ม": "Batch size", "วัตถุดิบ": "Ingredient", "ปริมาณ": "Amount", "ช่วงที่ใส่ / เวลา": "Stage / time", "ไม่มีข้อมูลวัตถุดิบ": "No ingredient data", "นำเข้าสูตรแล้ว": "Recipes imported", "นำเข้าไม่สำเร็จ": "Import failed", "อ่านไฟล์ XML ไม่ได้": "Could not read XML", "ไฟล์นี้ไม่มีสูตร BeerXML": "No BeerXML recipes found", "พบสูตรที่ไม่มีชื่อ": "A recipe has no name", "อ่านหรือบันทึกไฟล์ไม่ได้": "Could not read or save the file", "ยังไม่กำหนดวันเริ่ม Dry Hop": "Dry hop start date is unspecified"});
 const translationPattern = new RegExp(Object.keys(english).sort((a, b) => b.length - a.length)
   .map(key => [...key].map(char => '.*+?^${}()|[]'.includes(char) || char === String.fromCharCode(92)
     ? String.fromCharCode(92) + char : char).join('')).join('|'), 'g');

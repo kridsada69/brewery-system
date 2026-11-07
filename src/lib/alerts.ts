@@ -11,6 +11,12 @@ export function hazeHopOffset(name:string,minutes:number|null) {
   if (!/^haze\s+7-?0\s+v\.?23(?:\s+\(\d+\))?$/i.test(name.trim())) return null;
   return minutes === 2880 ? 2 : minutes === 5760 ? 10 : null;
 }
+// Default calendar schedule requested by the brewer: ferment date + BeerXML days.
+// Explicit schedules and the previously confirmed Haze schedule take precedence.
+export function dryHopOffset(name:string,minutes:number|null,afterDays:number|null|undefined) {
+  return hazeHopOffset(name,minutes) ?? afterDays ??
+    (minutes !== null && Number.isInteger(minutes / 1440) ? minutes / 1440 : null);
+}
 type StockItem = {type:string;name:string;grams:number};
 export function stockKey(item:Pick<StockItem,"type"|"name">) {
   return JSON.stringify([item.type,item.name.trim().toLowerCase()]);
@@ -33,7 +39,7 @@ export function buildSummary(data:SharedData,date=dateInThailand()) {
         if (batch.completedHops?.includes(index)) return;
         const minutes = rows?.[index]?.minutes ?? null;
         const key = String(minutes ?? "default");
-        const offset = hazeHopOffset(batch.recipe,minutes) ?? batch.dryHopAfterDays;
+        const offset = dryHopOffset(batch.recipe,minutes,batch.dryHopAfterDays);
         const due = batch.dryHopDates?.[key] || batch.dryHopOn || (offset==null ? null : shiftedDate(batch.fermentedOn,offset));
         if (due===date) pending.push(`• ${cabinet.id} · ถัง ${slot+1} · ${batch.recipe} · ${hop.name} ${hop.grams} g`);
       });
