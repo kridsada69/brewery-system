@@ -603,7 +603,7 @@ const statusStyles = {
 };
 
 let calendarMonth = new Date(today().slice(0, 7) + '-01T00:00:00Z');
-let monthFormat = new Intl.DateTimeFormat('th-TH', {month:'long', year:'numeric', timeZone:'UTC'});
+let monthFormat = new Intl.DateTimeFormat('th-TH', {month:'long', year:'numeric', calendar:'gregory', timeZone:'UTC'});
 
 function renderCalendar() {
   const events = new Map();
@@ -621,6 +621,41 @@ function renderCalendar() {
       });
     });
   });
+  const agenda = document.querySelector('#calendar-agenda');
+  agenda.replaceChildren();
+  const monthKey = calendarMonth.toISOString().slice(0, 7);
+  for (const [date, items] of [...events].filter(([date]) => date.startsWith(monthKey)).sort(([a], [b]) => a.localeCompare(b))) {
+    const section = document.createElement('section');
+    section.className = 'calendar-agenda-day';
+    const title = document.createElement('h3');
+    title.textContent = formatHopDate(date);
+    section.append(title);
+    for (const event of items) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'calendar-agenda-event ' + event.style;
+      const kind = document.createElement('strong');
+      kind.textContent = event.title;
+      const label = document.createElement('span');
+      label.textContent = event.label;
+      button.append(kind, label);
+      button.addEventListener('click', () => {
+        selected = event.cabinet;
+        selectedSlot = event.slot;
+        historyIndex = null;
+        const cabinet = cabinets[selected];
+        openBatch(cabinet.batches[selectedSlot], cabinet.id);
+      });
+      section.append(button);
+    }
+    agenda.append(section);
+  }
+  if (!agenda.children.length) {
+    const empty = document.createElement('p');
+    empty.className = 'py-8 text-center text-sm text-zinc-400';
+    empty.textContent = language === 'en' ? 'No events this month' : 'เดือนนี้ยังไม่มีรายการหมักหรือ Dry Hop';
+    agenda.append(empty);
+  }
   document.querySelector('#calendar-month').textContent = monthFormat.format(calendarMonth);
   const days = document.querySelector('#calendar-days');
   days.replaceChildren();
@@ -758,6 +793,8 @@ function renderStock() {
       const balance = row.insertCell();
       const remaining = stockOpening[key] == null ? null : stockOpening[key] - item.used;
       balance.textContent = remaining == null ? '—' : format.format(remaining / factor);
+      const headings = language === 'en' ? ['Ingredient', 'Opening stock (' + unit + ')', 'Used (' + unit + ')', 'Remaining (' + unit + ')'] : ['วัตถุดิบ', 'ยอดตั้งต้น (' + unit + ')', 'ตัดแล้ว (' + unit + ')', 'คงเหลือ (' + unit + ')'];
+      [...row.cells].forEach((cell, index) => { cell.dataset.label = headings[index]; });
       if (remaining < 0) balance.className = 'font-semibold text-red-300';
     }
   }
@@ -838,11 +875,11 @@ function render() {
       <p class="mt-1 text-xs text-zinc-400">All Rounder · ${maxLiters} ลิตร/ถัง</p>
       <p class="mt-3 text-sm text-zinc-300">ใช้ ${used}/${maxSlots} ช่อง · เหลือ ${free} ช่อง</p>
       <p class="mt-1 text-xs text-zinc-400">ความจุจากถังว่าง ${free * maxLiters} ลิตร</p>
-      <div class="mt-4 overflow-x-auto"><div class="grid min-w-[36rem] grid-cols-3 gap-3">${Array.from({length:maxSlots}, (_, slot) => {
+      <div class="tank-scroll mt-4"><div class="tank-grid grid grid-cols-1 gap-3 lg:grid-cols-3">${Array.from({length:maxSlots}, (_, slot) => {
         const batch = batches[slot];
-        return `<div data-drop-cabinet="${index}" data-drop-slot="${slot}" class="flex min-h-36 flex-col rounded-xl border border-zinc-700 bg-black/20 p-2">
+        return `<div data-drop-cabinet="${index}" data-drop-slot="${slot}" class="tank-slot flex min-h-36 flex-col rounded-xl border border-zinc-700 bg-black/20 p-2">
           <p class="mb-2 text-xs font-semibold text-zinc-300">ถัง ${slot + 1}</p>
-          ${batch ? `<button type="button" draggable="true" data-cabinet="${index}" data-slot="${slot}" class="block w-full flex-1 cursor-grab rounded-lg bg-black/25 p-2.5 hover:bg-black/40">
+          ${batch ? `<button type="button" draggable="true" data-cabinet="${index}" data-slot="${slot}" class="tank-card block w-full flex-1 cursor-grab rounded-lg bg-black/25 p-2.5 hover:bg-black/40">
           <span class="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold ${statusStyles[batch.status ?? 'Ferment']}">${batch.status === 'Cold crash' ? '<span aria-hidden="true">❄</span>' : ''}${batch.status ?? 'Ferment'}</span>
           <span class="mt-1 block text-xs text-zinc-300">ถัง ${slot + 1} · ${batch.status === 'Plan' ? 'ยังไม่เริ่มหมัก' : `<strong class="font-bold text-violet-300">หมักแล้ว ${fermentationDays(batch)} วัน</strong>`}</span>
           <span class="block mt-1 font-semibold">${escapeHtml(batch.recipe)} · ${batch.liters} ลิตร</span>
@@ -1084,17 +1121,30 @@ document.querySelector('#reset').addEventListener('click', () => {
 const sectionToggle = document.querySelector('#section-toggle');
 const sectionMenu = document.querySelector('#section-menu');
 const sectionSidebar = document.querySelector('#section-sidebar');
-const sectionButtons = [...sectionMenu.querySelectorAll('[data-view]')];
+const mobileNav = document.querySelector('#mobile-nav');
+const menuBackdrop = document.querySelector('#menu-backdrop');
+const sectionButtons = [...document.querySelectorAll('[data-view]')];
 function setMenuOpen(open) {
   sectionSidebar.hidden = !open;
   sectionToggle.setAttribute('aria-expanded', String(open));
+  const modal = open && window.matchMedia('(max-width:767px)').matches;
+  menuBackdrop.hidden = !modal;
+  sectionSidebar.style.top = modal ? Math.max(0, document.querySelector('#app-header').getBoundingClientRect().bottom) + 'px' : '';
+
+  nativeDocument.body.classList.toggle('mobile-menu-open', modal);
+  document.querySelector('#main-content').inert = modal;
+  mobileNav.inert = modal;
 }
 sectionToggle.addEventListener('click', () => setMenuOpen(sectionSidebar.hidden));
-sectionMenu.addEventListener('click', event => {
+menuBackdrop.addEventListener('click', () => { setMenuOpen(false); sectionToggle.focus(); });
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !menuBackdrop.hidden) { setMenuOpen(false); sectionToggle.focus(); }
+});
+function navigateSection(event) {
   const chosen = event.target.closest('[data-view]');
   if (!chosen) return;
   for (const button of sectionButtons) {
-    const active = button === chosen;
+    const active = button.dataset.view === chosen.dataset.view;
     button.setAttribute('aria-current', String(active));
     document.getElementById(button.dataset.view).hidden = !active;
   }
@@ -1102,10 +1152,14 @@ sectionMenu.addEventListener('click', event => {
     alertFeedback.textContent = '';
     renderAlerts();
   }
+  if (window.matchMedia('(max-width:767px)').matches) setMenuOpen(false);
   const heading = document.getElementById(chosen.dataset.view).querySelector('h1, h2');
   heading.tabIndex = -1;
-  heading.focus();
-});
+  heading.focus({preventScroll:true});
+  if (window.matchMedia('(max-width:767px)').matches) window.scrollTo({top:0, behavior:'instant'});
+}
+sectionMenu.addEventListener('click', navigateSection);
+mobileNav.addEventListener('click', navigateSection);
 
 const english = {
   "กด + ที่ตู้เพื่อบันทึกรอบที่ต้มเสร็จแล้ว · 1 ตู้ใส่ถัง All Rounder ได้ 3 ถัง ถังละไม่เกิน 60 ลิตร": "Select + to log a brewed batch. Each cooler holds three All Rounders, up to 60 L each.",
@@ -1194,7 +1248,7 @@ const english = {
   "วัน": "days",
   "ลบ": "Delete"
 };
-Object.assign(english, {"อุณหภูมิหมัก (°C)":"Fermentation temperature (°C)","เช่น 19.4":"e.g. 19.4","วันที่ใส่ Dry Hop":"Dry hop addition date","ยังไม่มีวันที่ใส่ Dry Hop · เลือกวันที่ด้านล่าง":"No dry hop date yet · Choose a date below","วันที่ใส่":"Addition date","แช่ฮอป":"Contact time","แจ้งเตือน":"Alerts","สรุปวันนี้ตามเวลาไทย พร้อมคัดลอกไปส่งใน LINE":"Today’s summary in Thailand time, ready to copy to LINE.","ข้อความสรุปสำหรับ LINE":"LINE summary","คัดลอกข้อความสำหรับ LINE":"Copy message for LINE","คัดลอกข้อความแล้ว":"Message copied","เลือกข้อความแล้ว กดคัดลอกเพื่อส่งใน LINE":"Message selected. Copy it to send in LINE.","Dry Hop ที่ต้องทำวันนี้":"Dry hops due today","ไม่มี Dry Hop ที่ต้องทำวันนี้":"No dry hops due today","สต็อกถึงเกณฑ์แจ้งเตือน":"Low stock alerts","ไม่พบวัตถุดิบต่ำกว่าเกณฑ์":"No ingredients below the threshold","ตรวจเฉพาะวัตถุดิบที่กรอกยอดตั้งต้นแล้ว":"Only ingredients with an opening balance entered are checked.","ยอดตั้งต้น":"Opening stock","ตัดแล้ว":"Used","คงเหลือ":"Remaining","สต็อกวัตถุดิบ":"Ingredient Stock","ชื่อวัตถุดิบมาจากสูตรเบียร์ กรอกยอดตั้งต้นรวมที่ใช้คำนวณสต็อก":"Ingredients come from beer recipes. Enter the opening totals to calculate stock.","ยอดตั้งต้น (g)":"Opening stock (g)","ตัดแล้ว (g)":"Used (g)","คงเหลือ (g)":"Remaining (g)","บันทึกยอดสต็อก":"Save stock totals","บันทึกยอดสต็อกแล้ว":"Stock totals saved","แก้ไขสูตร":"Edit recipe","บันทึกสูตร":"Save recipe","บันทึกสูตรแล้ว":"Recipe saved","บันทึกการแก้ไขสูตรไม่ได้":"Could not save recipe changes","ลบสูตร":"Delete recipe","ลบสูตรแล้ว":"Recipe deleted","ยังไม่มีสูตรเบียร์":"No recipes yet","บันทึกการลบสูตรไม่ได้":"Could not save recipe deletion","หลังเริ่มหมัก 2 วัน":"2 days after fermentation starts","ก่อนจบการหมัก 4 วัน":"4 days before fermentation ends","รอบ Dry Hop":"Dry Hop round","วันเริ่มรอบนี้":"Start date for this round","เริ่ม Dry Hop หลังเริ่มหมัก":"Dry hop starts after fermentation begins","กำหนดวันเริ่ม Dry Hop":"Set dry hop start date","เว้นว่างเพื่อใช้วันที่จากสูตร ถ้ามี":"Leave blank to use the recipe schedule, when available.","สูตรตัวอย่าง":"Demo recipe","นำเข้า BeerXML": "Import BeerXML", "ขนาดรอบต้ม": "Batch size", "วัตถุดิบ": "Ingredient", "ปริมาณ": "Amount", "ช่วงที่ใส่ / เวลา": "Stage / time", "ไม่มีข้อมูลวัตถุดิบ": "No ingredient data", "นำเข้าสูตรแล้ว": "Recipes imported", "นำเข้าไม่สำเร็จ": "Import failed", "อ่านไฟล์ XML ไม่ได้": "Could not read XML", "ไฟล์นี้ไม่มีสูตร BeerXML": "No BeerXML recipes found", "พบสูตรที่ไม่มีชื่อ": "A recipe has no name", "อ่านหรือบันทึกไฟล์ไม่ได้": "Could not read or save the file", "ยังไม่กำหนดวันเริ่ม Dry Hop": "Dry hop start date is unspecified"});
+Object.assign(english, {"เมนูหลักบนมือถือ":"Mobile navigation","ปิดเมนู":"Close menu","ถังหมัก":"Tanks","ปฏิทิน":"Calendar","สูตร":"Recipes","สต็อก":"Stock","เตือน":"Alerts","ประวัติ":"History","อุณหภูมิหมัก (°C)":"Fermentation temperature (°C)","เช่น 19.4":"e.g. 19.4","วันที่ใส่ Dry Hop":"Dry hop addition date","ยังไม่มีวันที่ใส่ Dry Hop · เลือกวันที่ด้านล่าง":"No dry hop date yet · Choose a date below","วันที่ใส่":"Addition date","แช่ฮอป":"Contact time","แจ้งเตือน":"Alerts","สรุปวันนี้ตามเวลาไทย พร้อมคัดลอกไปส่งใน LINE":"Today’s summary in Thailand time, ready to copy to LINE.","ข้อความสรุปสำหรับ LINE":"LINE summary","คัดลอกข้อความสำหรับ LINE":"Copy message for LINE","คัดลอกข้อความแล้ว":"Message copied","เลือกข้อความแล้ว กดคัดลอกเพื่อส่งใน LINE":"Message selected. Copy it to send in LINE.","Dry Hop ที่ต้องทำวันนี้":"Dry hops due today","ไม่มี Dry Hop ที่ต้องทำวันนี้":"No dry hops due today","สต็อกถึงเกณฑ์แจ้งเตือน":"Low stock alerts","ไม่พบวัตถุดิบต่ำกว่าเกณฑ์":"No ingredients below the threshold","ตรวจเฉพาะวัตถุดิบที่กรอกยอดตั้งต้นแล้ว":"Only ingredients with an opening balance entered are checked.","ยอดตั้งต้น":"Opening stock","ตัดแล้ว":"Used","คงเหลือ":"Remaining","สต็อกวัตถุดิบ":"Ingredient Stock","ชื่อวัตถุดิบมาจากสูตรเบียร์ กรอกยอดตั้งต้นรวมที่ใช้คำนวณสต็อก":"Ingredients come from beer recipes. Enter the opening totals to calculate stock.","ยอดตั้งต้น (g)":"Opening stock (g)","ตัดแล้ว (g)":"Used (g)","คงเหลือ (g)":"Remaining (g)","บันทึกยอดสต็อก":"Save stock totals","บันทึกยอดสต็อกแล้ว":"Stock totals saved","แก้ไขสูตร":"Edit recipe","บันทึกสูตร":"Save recipe","บันทึกสูตรแล้ว":"Recipe saved","บันทึกการแก้ไขสูตรไม่ได้":"Could not save recipe changes","ลบสูตร":"Delete recipe","ลบสูตรแล้ว":"Recipe deleted","ยังไม่มีสูตรเบียร์":"No recipes yet","บันทึกการลบสูตรไม่ได้":"Could not save recipe deletion","หลังเริ่มหมัก 2 วัน":"2 days after fermentation starts","ก่อนจบการหมัก 4 วัน":"4 days before fermentation ends","รอบ Dry Hop":"Dry Hop round","วันเริ่มรอบนี้":"Start date for this round","เริ่ม Dry Hop หลังเริ่มหมัก":"Dry hop starts after fermentation begins","กำหนดวันเริ่ม Dry Hop":"Set dry hop start date","เว้นว่างเพื่อใช้วันที่จากสูตร ถ้ามี":"Leave blank to use the recipe schedule, when available.","สูตรตัวอย่าง":"Demo recipe","นำเข้า BeerXML": "Import BeerXML", "ขนาดรอบต้ม": "Batch size", "วัตถุดิบ": "Ingredient", "ปริมาณ": "Amount", "ช่วงที่ใส่ / เวลา": "Stage / time", "ไม่มีข้อมูลวัตถุดิบ": "No ingredient data", "นำเข้าสูตรแล้ว": "Recipes imported", "นำเข้าไม่สำเร็จ": "Import failed", "อ่านไฟล์ XML ไม่ได้": "Could not read XML", "ไฟล์นี้ไม่มีสูตร BeerXML": "No BeerXML recipes found", "พบสูตรที่ไม่มีชื่อ": "A recipe has no name", "อ่านหรือบันทึกไฟล์ไม่ได้": "Could not read or save the file", "ยังไม่กำหนดวันเริ่ม Dry Hop": "Dry hop start date is unspecified"});
 const translationPattern = new RegExp(Object.keys(english).sort((a, b) => b.length - a.length)
   .map(key => [...key].map(char => '.*+?^${}()|[]'.includes(char) || char === String.fromCharCode(92)
     ? String.fromCharCode(92) + char : char).join('')).join('|'), 'g');
@@ -1236,7 +1290,7 @@ function applyLanguage() {
   document.querySelector('#language-name').textContent = language === 'en' ? 'ENGLISH' : 'ภาษาไทย';
   document.querySelector('#language-code').textContent = language === 'en' ? 'EN' : 'TH';
   dateFormat = new Intl.DateTimeFormat(language === 'en' ? 'en-GB' : 'th-TH', {dateStyle:'medium', timeZone:'UTC'});
-  monthFormat = new Intl.DateTimeFormat(language === 'en' ? 'en-GB' : 'th-TH', {month:'long', year:'numeric', timeZone:'UTC'});
+  monthFormat = new Intl.DateTimeFormat(language === 'en' ? 'en-GB' : 'th-TH', {month:'long', year:'numeric', calendar:'gregory', timeZone:'UTC'});
   render();
   if (!document.querySelector('#recipe-details form')) renderRecipe();
   translatePage();
@@ -1255,9 +1309,14 @@ applyLanguage();
 if (!storage.getItem(storageKey)) persist();
 if (!storage.getItem(recipeStorageKey)) storage.setItem(recipeStorageKey, JSON.stringify(recipes));
 
-  if (window.matchMedia('(max-width:639px)').matches) setMenuOpen(false);
+  if (window.matchMedia('(max-width:767px)').matches) setMenuOpen(false);
+  const mobileLayout = window.matchMedia('(max-width:767px)');
+  const updateMenuLayout = () => setMenuOpen(!mobileLayout.matches);
+  mobileLayout.addEventListener?.('change', updateMenuLayout);
   return () => {
     translator.disconnect();
+    nativeDocument.body.classList.remove('mobile-menu-open');
+    mobileLayout.removeEventListener?.('change', updateMenuLayout);
     for (const args of listeners) nativeDocument.removeEventListener(...args);
   };
 }

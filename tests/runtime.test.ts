@@ -12,7 +12,8 @@ test("migrated UI mounts, saves Ferment, restores stock on Plan and completes wi
   for (const key of ["window","document","NodeFilter","DOMParser","MutationObserver","Option","FormData","Blob"]) {
     Object.defineProperty(globalThis,key,{value:window[key as keyof typeof window],configurable:true});
   }
-  Object.defineProperty(window,"matchMedia",{value:()=>({matches:false})});
+  Object.defineProperty(window,"matchMedia",{value:()=>({matches:true})});
+  window.scrollTo=()=>{};
   window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
   window.HTMLDialogElement.prototype.close=function(){this.open=false;};
   let confirmed=true;
@@ -28,6 +29,20 @@ test("migrated UI mounts, saves Ferment, restores stock on Plan and completes wi
   function board() {return JSON.parse(saved["brew-day-board-v1"]);}
   try {
     assert.match(root.querySelector("#board")!.textContent!,/C-01/);
+    assert.equal((root.querySelector('#section-sidebar') as HTMLElement).hidden,true);
+    click('#section-toggle');
+    assert.equal((root.querySelector('#menu-backdrop') as HTMLElement).hidden,false);
+    assert.equal((root.querySelector('#main-content') as HTMLElement).inert,true);
+    click('#menu-backdrop');
+    assert.equal((root.querySelector('#section-sidebar') as HTMLElement).hidden,true);
+    click('#mobile-nav [data-view="calendar-view"]');
+    assert.equal((root.querySelector('#calendar-view') as HTMLElement).hidden,false);
+    assert.equal((root.querySelector('#board-view') as HTMLElement).hidden,true);
+    assert.ok(root.querySelector('#calendar-agenda .calendar-agenda-event'));
+    assert.equal(root.querySelector('#section-menu [data-view="calendar-view"]')!.getAttribute('aria-current'),'true');
+    click('#mobile-nav [data-view="board-view"]');
+    assert.equal((root.querySelector('#board-view') as HTMLElement).hidden,false);
+
     click('[data-cabinet="0"][data-slot="0"]');
     const form=root.querySelector("#batch") as HTMLFormElement;
     for (const [name,value] of Object.entries({recipe:"Von Elbert",status:"Ferment",og:"1.06",ph:"5.4",liters:"45",fermentationTemperature:"19.4"})) {

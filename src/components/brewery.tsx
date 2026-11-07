@@ -13,6 +13,7 @@ export default function Brewery() {
   const queue=useRef<Promise<void>>(Promise.resolve());
   const failed=useRef(false);
   const [ready,setReady]=useState(false);
+  const [toolsOpen,setToolsOpen]=useState(false);
   const [status,setStatus]=useState("กำลังโหลดข้อมูล / Loading…");
   useEffect(()=>{
     const controller=new AbortController();
@@ -64,9 +65,10 @@ export default function Brewery() {
     setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
   return <>
-    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 bg-zinc-950 px-4 py-2 text-xs">
+    <div className="app-toolbar flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 bg-zinc-950 px-4 py-2 text-xs">
       <p role="status" className="text-amber-200">{status}</p>
-      <div className="flex flex-wrap gap-3">
+      <button type="button" className="tools-toggle" aria-expanded={toolsOpen} aria-controls="app-tools" onClick={()=>setToolsOpen(!toolsOpen)}>เครื่องมือ</button>
+      <div id="app-tools" data-open={toolsOpen} className="flex flex-wrap gap-3">
         <button onClick={()=>window.location.reload()} className="flex items-center gap-1"><RefreshCw size={14}/>โหลดใหม่ / Reload</button>
         <button disabled={!ready} onClick={exportData} className="flex items-center gap-1"><Download size={14}/>Export</button>
         <label className="flex cursor-pointer items-center gap-1"><Upload size={14}/>Import backup
