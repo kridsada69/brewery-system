@@ -25,8 +25,14 @@ export function validSession(token: string | undefined, now = Date.now()) {
 export async function authenticated() {
   return validSession((await cookies()).get(cookieName)?.value);
 }
+export function applicationOrigin(request: Request) {
+  // Use deployment configuration rather than untrusted forwarded request headers.
+  const configured = process.env.APP_ORIGIN ||
+    (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : null);
+  return new URL(configured || request.url).origin;
+}
 export function sameOrigin(request: Request) {
   const origin = request.headers.get("origin");
-  return Boolean(origin && origin === new URL(request.url).origin);
+  return Boolean(origin && origin === applicationOrigin(request));
 }
 export const sessionCookie = cookieName;

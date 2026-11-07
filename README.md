@@ -185,6 +185,8 @@ npm run start:prod
 - `LINE_CHANNEL_ACCESS_TOKEN` และ `LINE_USER_ID`: ตั้งเมื่อใช้แจ้งเตือน LINE
 
 ให้ Railway กำหนด `PORT` และตั้ง `NODE_ENV=production`
+แอปใช้ `RAILWAY_PUBLIC_DOMAIN` ที่ Railway กำหนดให้อัตโนมัติเพื่อตรวจ origin และตั้ง secure session cookie
+หากใช้โดเมนอื่น ให้ตั้ง `APP_ORIGIN` เป็น URL เต็ม เช่น `https://brewery.example.com`
 คำสั่ง `start:cloud` อ่านค่าจาก Railway โดยตรง ไม่ต้องอัปโหลด `.env.prod`
 ไฟล์ `.railwayignore` กันไฟล์ค่าลับและ dependencies บนเครื่องออกจากการอัปโหลดด้วย CLI
 เลือก Generate Domain หลัง deploy เพื่อเปิดแอปผ่าน HTTPS

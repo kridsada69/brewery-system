@@ -2,7 +2,7 @@ import {test} from "node:test";
 import assert from "node:assert/strict";
 import {buildSummary,belowThreshold,hazeHopOffset,dryHopOffset,shiftedDate,stockKey} from "../src/lib/alerts";
 import {saveSchema} from "../src/lib/state";
-import {createSession,validSession} from "../src/lib/auth";
+import {applicationOrigin,sameOrigin,createSession,validSession} from "../src/lib/auth";
 const recipe={hops:[{name:"Citra",grams:50},{name:"Mosaic",grams:40}],dryHopAfterDays:2};
 const batch={recipe:"IPA",status:"Ferment",og:1.06,ph:5.4,liters:45,fermentedOn:"2026-11-05",dryHopAfterDays:2,
   completedHops:[0],recipeSnapshot:recipe,stockUsage:{base:[{type:"Malt",name:"Pale",grams:5000}],hops:{"0":{type:"Hop",name:"Citra",grams:50}}}};
@@ -70,4 +70,32 @@ test("default dry hop dates use ferment date plus XML days in alerts",()=>{
   source['brew-day-board-v1']=JSON.stringify(board);
   assert.doesNotMatch(buildSummary(source,'2026-11-07'),/Mosaic 40 g/);
   assert.match(buildSummary(source,'2026-11-08'),/Mosaic 40 g/);
+});
+
+test("Railway origin checks use configured HTTPS domain behind an HTTP proxy",()=>{
+  const previousDomain=process.env.RAILWAY_PUBLIC_DOMAIN;
+  const previousOrigin=process.env.APP_ORIGIN;
+  try {
+    delete process.env.APP_ORIGIN;
+    process.env.RAILWAY_PUBLIC_DOMAIN='brewery.example';
+    const request=(origin?:string)=>new Request('http://0.0.0.0:8080/api/session',{
+      headers:{...(origin?{Origin:origin}:{}),'x-forwarded-host':'attacker.example','x-forwarded-proto':'https'}
+    });
+    assert.equal(applicationOrigin(request()),'https://brewery.example');
+    assert.equal(sameOrigin(request('https://brewery.example')),true);
+    for(const origin of [undefined,'null','https://attacker.example','http://brewery.example','https://brewery.example.attacker.test']) {
+      assert.equal(sameOrigin(request(origin)),false);
+    }
+    process.env.APP_ORIGIN='https://custom.example';
+    assert.equal(sameOrigin(request('https://custom.example')),true);
+    assert.equal(sameOrigin(request('https://brewery.example')),false);
+    delete process.env.APP_ORIGIN;
+    delete process.env.RAILWAY_PUBLIC_DOMAIN;
+    assert.equal(sameOrigin(new Request('http://localhost:3000/api/session',{headers:{Origin:'http://localhost:3000'}})),true);
+  } finally {
+    if(previousDomain===undefined) delete process.env.RAILWAY_PUBLIC_DOMAIN;
+    else process.env.RAILWAY_PUBLIC_DOMAIN=previousDomain;
+    if(previousOrigin===undefined) delete process.env.APP_ORIGIN;
+    else process.env.APP_ORIGIN=previousOrigin;
+  }
 });
