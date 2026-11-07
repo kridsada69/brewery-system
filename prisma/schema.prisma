@@ -1,0 +1,19 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+model Workspace {
+  id String @id
+  revision Int @default(0)
+  data Json
+  updatedAt DateTime @updatedAt
+}
+model AlertDelivery {
+  id String @id
+  retryKey String @unique
+  message String
+  sentAt DateTime?
+}
